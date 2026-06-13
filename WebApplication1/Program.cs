@@ -14,7 +14,7 @@ using System.Text.RegularExpressions;
 
 public partial class Program
 {
-    private static void Main(string[] args)
+    private static async Task Main(string[] args)
     {
         var builder = WebApplication.CreateSlimBuilder(args);
 
@@ -25,7 +25,7 @@ public partial class Program
 
         // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
         builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite("Data source=expenses.db"));
-
+        builder.Services.AddScoped<ExpenseAnalyticsService>();
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddSwaggerGen();
 
@@ -51,7 +51,7 @@ public partial class Program
 
         var group = app.MapGroup("/expenses");
 
-        group.MapGet("/", async (AppDbContext db, DateTime? from, DateTime? to, decimal? min, decimal? max, string? search) => {
+        group.MapGet("/", async (AppDbContext db, DateTime? from, DateTime? to, decimal? min, decimal? max, string? category, string? search) => {
             
                 var query = db.Expenses.AsQueryable();
                 
@@ -69,6 +69,9 @@ public partial class Program
 
             if (!string.IsNullOrWhiteSpace(search))
                 query = query.Where(e => e.Title.Contains(search));
+
+            if (!string.IsNullOrWhiteSpace(category))
+                query = query.Where(e => e.Category == category);
 
             return await query.ToListAsync();
             });
@@ -89,6 +92,8 @@ public partial class Program
             exp.Title = expDto.Title;
             exp.Value = expDto.Value;
             exp.Date = expDto.Date;
+            exp.Category = expDto.Category;
+
 
             db.Expenses.Add(exp);
             await db.SaveChangesAsync();
@@ -118,6 +123,7 @@ public partial class Program
             expense.Title = updExp.Title;
             expense.Value = updExp.Value;
             expense.Date = updExp.Date;
+            expense.Category = updExp.Category;
 
             await db.SaveChangesAsync();
             return Results.Ok(expense);
@@ -130,32 +136,67 @@ public partial class Program
             return Results.Ok(await expStat.GetStats());
         });
 
-        group.MapGet("/weekly", async (AppDbContext db) =>
+        group.MapGet("/biggest-spending-weekly", async (AppDbContext db, ExpenseAnalyticsService analytics) =>
         {
-            var weekly = await db.Expenses.GroupBy(e => e.Date.Date.AddDays(-(int)e.Date.DayOfWeek)).Select(g =>
-            new
-            {
-                WeekStart = g.Key,
-                Value = g.Sum(e => e.Value),
-                Count = g.Count()
-            }).OrderBy(x => x.WeekStart).ToListAsync();
+            var weekly = await analytics.GetSpendingByPeriod(PeriodType.Week, true);
 
             return Results.Ok(weekly);
         });
 
-        group.MapGet("/monthly", async (AppDbContext db) =>
+        group.MapGet("/smallest-spending-weekly", async (AppDbContext db, ExpenseAnalyticsService analytics) =>
         {
-            var monthly = await db.Expenses.GroupBy(e => new { e.Date.Year, e.Date.Month }).Select(g =>
-            new
-            {
-                Year = g.Key.Year,
-                Month = g.Key.Month,
-                Value = g.Sum(e => e.Value),
-                Count = g.Count()
-            }).OrderBy(x => x.Year).ThenBy(x => x.Month).ToListAsync();
+            var weekly = await analytics.GetSpendingByPeriod(PeriodType.Week, false);
+
+            return Results.Ok(weekly);
+        });
+
+        group.MapGet("/biggest-spending-monthly", async (AppDbContext db, ExpenseAnalyticsService analytics) =>
+        {
+            var monthly = await analytics.GetSpendingByPeriod(PeriodType.Week, true);
 
             return Results.Ok(monthly);
         });
+
+        group.MapGet("/smallest-spending-monthly", async (AppDbContext db, ExpenseAnalyticsService analytics) =>
+        {
+            var monthly = await analytics.GetSpendingByPeriod(PeriodType.Week, false);
+
+            return Results.Ok(monthly);
+        });
+
+        group.MapGet("/top", async (AppDbContext db) =>
+        {
+            var top = await db.Expenses.OrderByDescending(e => e.Value).Take(5).ToListAsync();
+            
+            return Results.Ok(top);
+        });
+
+        group.MapGet("/top-categories", async (AppDbContext db) =>
+        {
+            var top_categories = await db.Expenses.GroupBy(e => e.Category).Select(g =>
+            new
+            {
+                Category = g.Key,
+                Total = g.Sum(e => e.Value),
+                Count = g.Count()
+            }).OrderByDescending(g => g.Total).ToListAsync();
+
+            return Results.Ok(top_categories);
+        });
+
+        group.MapGet("/biggest-spending-day", async (AppDbContext db, ExpenseAnalyticsService analytics) =>
+        {
+            var biggest_day = await analytics.GetSpendingByPeriod(PeriodType.Day, true);
+            return Results.Ok(biggest_day);
+        });
+
+
+        group.MapGet("/smallest-spending-day", async (AppDbContext db, ExpenseAnalyticsService analytics) =>
+        {
+            var biggest_day = await analytics.GetSpendingByPeriod(PeriodType.Day, false);
+            return Results.Ok(biggest_day);
+        });
+
 
         using (var scope = app.Services.CreateScope())
         {
@@ -165,7 +206,7 @@ public partial class Program
             var generator = new GenerateData();
 
             if (!db.Expenses.Any())
-                generator.Generate(db);
+                await generator.Generate(db);
         }
         app.Run();
     }
@@ -177,15 +218,16 @@ public class Expense
     public string Title { get; set; } = "";
     public decimal Value { get; set; }
     public DateTime Date { get; set; }
-
+    public string Category { get; set; } = "";
     public Expense() { }
 
-    public Expense(int id, string title, decimal value, DateTime date)
+    public Expense(int id, string title, decimal value, DateTime date, string category)
     {
         Id = id;
         Title = title;
         Value = value;
         Date = date;
+        Category = category;
     }
 }
 
@@ -194,6 +236,7 @@ public class CreateExpenseDto
     public string Title { get; set; } = "";
     public decimal Value { get; set; }
     public DateTime Date { get; set; }
+    public string Category { get; set; } = "";
 
 }
 
@@ -202,6 +245,8 @@ public class UpdateExpenseDto
     public string Title { get; set; } = "";
     public decimal Value { get; set; }
     public DateTime Date { get; set; }
+    public string Category { get; set; } = "";
+
 }
 
 public class ExpenseStatsDto
