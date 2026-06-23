@@ -1,15 +1,8 @@
 using Expenses;
 using ExpensesApi.Data;
-using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Routing.Constraints;
 using Microsoft.EntityFrameworkCore;
-using Swashbuckle.AspNetCore;
-using System.Numerics;
-using System.Reflection.Emit;
-using System.Security.Cryptography.X509Certificates;
 using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
 
 
 public partial class Program
@@ -152,14 +145,14 @@ public partial class Program
 
         group.MapGet("/biggest-spending-monthly", async (AppDbContext db, ExpenseAnalyticsService analytics) =>
         {
-            var monthly = await analytics.GetSpendingByPeriod(PeriodType.Week, true);
+            var monthly = await analytics.GetSpendingByPeriod(PeriodType.Month, true);
 
             return Results.Ok(monthly);
         });
 
         group.MapGet("/smallest-spending-monthly", async (AppDbContext db, ExpenseAnalyticsService analytics) =>
         {
-            var monthly = await analytics.GetSpendingByPeriod(PeriodType.Week, false);
+            var monthly = await analytics.GetSpendingByPeriod(PeriodType.Month, false);
 
             return Results.Ok(monthly);
         });
