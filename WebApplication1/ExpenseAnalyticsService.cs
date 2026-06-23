@@ -1,4 +1,5 @@
-﻿using ExpensesApi.Data;
+using ExpensesApi.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace Expenses
 {
@@ -60,7 +61,7 @@ namespace Expenses
             var query = biggest ? group.OrderByDescending(x => x.Total) :
                 group.OrderBy(x => x.Total);
 
-            return query.FirstOrDefault();
+            return await query.FirstOrDefaultAsync();
 
             }
 
